@@ -1,24 +1,51 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useRef } from "react";
+import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
+import { createThread, listThreads } from "@/lib/threads";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "Braise — Votre assistant IA" },
+      { name: "description", content: "Discutez avec Braise, une IA générative pour écrire, apprendre et créer." },
+      { property: "og:title", content: "Braise — Votre assistant IA" },
+      { property: "og:description", content: "Discutez avec Braise, une IA générative pour écrire, apprendre et créer." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+  }),
   component: Index,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
 function Index() {
+  const navigate = useNavigate();
+  const { user, loading } = useAuth();
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      navigate({ to: "/auth", replace: true });
+      return;
+    }
+    if (started.current) return;
+    started.current = true;
+    (async () => {
+      try {
+        const threads = await listThreads();
+        const target = threads[0] ?? (await createThread(user.id));
+        navigate({ to: "/chat/$threadId", params: { threadId: target.id }, replace: true });
+      } catch {
+        toast.error("Impossible de charger vos discussions.");
+      }
+    })();
+  }, [loading, user, navigate]);
+
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
-    </div>
+    <main className="flex min-h-screen items-center justify-center bg-background bg-glow">
+      <Shimmer>Chargement…</Shimmer>
+    </main>
   );
 }
