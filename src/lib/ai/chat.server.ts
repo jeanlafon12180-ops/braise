@@ -2,13 +2,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createClient } from "@supabase/supabase-js";
 import { convertToModelMessages, streamText, type UIMessage } from "ai";
 import type { Database, Json } from "@/integrations/supabase/types";
-import {
-  createLovableAiGatewayRunIdFetch,
-  getLovableAiGatewayRunId,
-  withLovableAiGatewayRunIdHeader,
-} from "./run-id.server";
 
-const MODEL = "openai/gpt-6-astra";
 const INSTRUCTIONS =
   "Tu es Braise, un assistant IA généraliste, chaleureux et précis. Réponds dans la langue de l'utilisateur (par défaut en français). Utilise le markdown (titres, listes, blocs de code) quand cela aide à la lecture.";
 
@@ -42,8 +36,12 @@ function titleFrom(message: UIMessage | undefined) {
 }
 
 export async function handleChat(request: Request) {
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) return json(500, "Le service IA n'est pas configuré.");
+  const apiKey = process.env.OPENAI_API_KEY;
+  const model = process.env.OPENAI_MODEL;
+  if (!apiKey || !model) {
+    console.error("Missing OPENAI_API_KEY or OPENAI_MODEL environment variable.");
+    return json(500, "Le service IA n'est pas configuré. Contactez l'administrateur.");
+  }
 
   const token = request.headers.get("authorization")?.replace(/^Bearer /, "");
   if (!token || token.split(".").length !== 3) return json(401, "Veuillez vous connecter.");
@@ -74,38 +72,25 @@ export async function handleChat(request: Request) {
   if (threadError) return json(500, "Impossible de charger la discussion.");
   if (!thread) return json(404, "Discussion introuvable.");
 
-  const runIdFetch = createLovableAiGatewayRunIdFetch(getLovableAiGatewayRunId(request));
-  const provider = createOpenAI({
-    baseURL: "https://ai.gateway.lovable.dev/v1",
-    apiKey,
-    headers: { "Lovable-API-Key": apiKey, "X-Lovable-AIG-SDK": "vercel-ai-sdk" },
-    fetch: runIdFetch.fetch,
-  });
+  // Uses OpenAI's API directly. Keep this key server-side; never expose it in VITE_* variables.
+  const provider = createOpenAI({ apiKey });
 
   const result = streamText({
-    model: provider.responses(MODEL),
+    model: provider.responses(model),
     instructions: INSTRUCTIONS,
     messages: await convertToModelMessages(messages),
     abortSignal: request.signal,
-    providerOptions: {
-      openai: {
-        forceReasoning: true,
-        reasoningEffort: "medium",
-        reasoningSummary: "auto",
-        store: false,
-        include: ["reasoning.encrypted_content"],
-      },
-    },
   });
 
-  const response = result.toUIMessageStreamResponse({
+  return result.toUIMessageStreamResponse({
     originalMessages: messages,
-    sendReasoning: true,
     onError: (error) => {
       console.error("chat stream error", error);
-      const status = (error as { statusCode?: number })?.statusCode;
+      const status = (error as { statusCode?: number; status?: number })?.statusCode
+        ?? (error as { status?: number })?.status;
       if (status === 429) return "Trop de demandes, réessayez dans un instant.";
-      if (status === 402) return "Crédits IA épuisés. Ajoutez des crédits à votre espace de travail.";
+      if (status === 401 || status === 403) return "La configuration du service IA est invalide.";
+      if (status === 402) return "Le compte API ne dispose pas du crédit ou du paiement nécessaire.";
       return "Une erreur est survenue pendant la génération.";
     },
     onFinish: async ({ messages: finalMessages }) => {
@@ -132,6 +117,4 @@ export async function handleChat(request: Request) {
       if (tErr) console.error("Failed to update thread", tErr);
     },
   });
-
-  return withLovableAiGatewayRunIdHeader(response, runIdFetch);
 }

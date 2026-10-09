@@ -2,7 +2,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable/index";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,8 +58,17 @@ function AuthPage() {
   }
 
   async function google() {
-    const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin });
-    if (result.error) toast.error("Connexion Google impossible");
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: window.location.origin },
+      });
+      if (error) throw error;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Connexion Google impossible");
+      setBusy(false);
+    }
   }
 
   return (
@@ -75,7 +83,7 @@ function AuthPage() {
         </div>
 
         <div className="rounded-2xl border bg-card p-6 shadow-2xl">
-          <Button type="button" variant="outline" className="w-full" onClick={google}>
+          <Button type="button" variant="outline" className="w-full" onClick={google} disabled={busy}>
             Continuer avec Google
           </Button>
           <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
